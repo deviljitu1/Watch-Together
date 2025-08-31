@@ -12,9 +12,13 @@ const server = http.createServer(app);
 // Configure CORS
 const io = new Server(server, {
   cors: {
-    origin: process.env.NODE_ENV === "production" 
-      ? ["https://watch-together-vpdd.onrender.com"]  // ← YOUR RENDER URL
-      : ["http://localhost:8000", "http://localhost:3000", "http://127.0.0.1:5500"],
+    origin: [
+      "https://deviljitu1.github.io/Watch-Together-Frontend/",  // Your GitHub Pages URL
+      "https://watch-together-vpdd.onrender.com", // Your Render URL
+      "http://localhost:8000", 
+      "http://localhost:3000", 
+      "http://127.0.0.1:5500"
+    ],
     methods: ["GET", "POST"],
     credentials: true
   },
