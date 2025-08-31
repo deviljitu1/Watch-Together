@@ -1,30 +1,34 @@
 const mongoose = require('mongoose');
 
 const roomSchema = new mongoose.Schema({
-  code: {
-    type: String,
-    required: true,
-    unique: true
+  roomCode: { 
+    type: String, 
+    required: true, 
+    unique: true,
+    uppercase: true
   },
-  host: {
-    type: String,
-    required: true
+  videoId: String,
+  currentTime: { 
+    type: Number, 
+    default: 0 
   },
-  videoUrl: {
-    type: String,
-    default: ''
+  isPlaying: { 
+    type: Boolean, 
+    default: false 
   },
-  isPlaying: {
-    type: Boolean,
-    default: false
+  host: { 
+    type: String, 
+    required: true 
   },
-  currentTime: {
-    type: Number,
-    default: 0
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  users: [{
+    socketId: String,
+    username: String,
+    isHost: Boolean
+  }],
+  createdAt: { 
+    type: Date, 
+    default: Date.now, 
+    expires: 86400 // Auto-delete after 24 hours
   }
 });
 
