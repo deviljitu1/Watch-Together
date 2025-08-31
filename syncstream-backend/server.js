@@ -1,15 +1,10 @@
-require('dotenv').config();
+require('dotenv').config(); // ← ADD THIS
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 const mongoose = require("mongoose");
-
-// Import models
-const Room = require("./models/Room");
-const Message = require("./models/Message");
-const User = require("./models/User");
 
 const app = express();
 const server = http.createServer(app);
@@ -18,7 +13,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === "production" 
-      ? [process.env.FRONTEND_URL] 
+      ? ["https://watch-together-vpdd.onrender.com"]  // ← YOUR RENDER URL
       : ["http://localhost:8000", "http://localhost:3000", "http://127.0.0.1:5500"],
     methods: ["GET", "POST"],
     credentials: true
@@ -41,6 +36,41 @@ mongoose.connect(MONGODB_URI)
   .catch((err) => {
     console.error("❌ MongoDB connection error:", err);
   });
+
+// MongoDB Schemas
+const roomSchema = new mongoose.Schema({
+  roomCode: { 
+    type: String, 
+    required: true, 
+    unique: true,
+    uppercase: true
+  },
+  videoId: String,
+  currentTime: { 
+    type: Number, 
+    default: 0 
+  },
+  isPlaying: { 
+    type: Boolean, 
+    default: false 
+  },
+  host: { 
+    type: String, 
+    required: true 
+  },
+  users: [{
+    socketId: String,
+    username: String,
+    isHost: Boolean
+  }],
+  createdAt: { 
+    type: Date, 
+    default: Date.now, 
+    expires: 86400 // Auto-delete after 24 hours
+  }
+});
+
+const Room = mongoose.model('Room', roomSchema);
 
 const PORT = process.env.PORT || 5000;
 
@@ -189,35 +219,8 @@ io.on("connection", async (socket) => {
   });
 
   // Chat message
-  socket.on("chat_message", async ({ roomCode, sender, message }) => {
-    try {
-      // Save message to database
-      const chatMessage = new Message({
-        roomCode,
-        sender,
-        message,
-        timestamp: new Date()
-      });
-      await chatMessage.save();
-      
-      // Broadcast to all clients in the room
-      io.to(roomCode).emit("chat_message", { sender, message, timestamp: chatMessage.timestamp });
-    } catch (error) {
-      console.error("Error saving message:", error);
-    }
-  });
-
-  // Get chat history
-  socket.on("get_chat_history", async ({ roomCode }) => {
-    try {
-      const messages = await Message.find({ roomCode })
-        .sort({ timestamp: 1 })
-        .limit(50);
-      
-      socket.emit("chat_history", messages);
-    } catch (error) {
-      console.error("Error fetching chat history:", error);
-    }
+  socket.on("chat_message", ({ roomCode, sender, message }) => {
+    io.to(roomCode).emit("chat_message", { sender, message });
   });
 
   // Leave room
@@ -238,8 +241,6 @@ io.on("connection", async (socket) => {
         // Delete room if empty
         if (room.users.length === 0) {
           await Room.deleteOne({ roomCode });
-          // Also clean up old messages
-          await Message.deleteMany({ roomCode });
         } else {
           await room.save();
           io.to(roomCode).emit("participants", { count: room.users.length });
@@ -273,7 +274,6 @@ io.on("connection", async (socket) => {
           // Delete room if empty
           if (room.users.length === 0) {
             await Room.deleteOne({ roomCode });
-            await Message.deleteMany({ roomCode });
           } else {
             await room.save();
             io.to(roomCode).emit("participants", { count: room.users.length });
@@ -286,20 +286,7 @@ io.on("connection", async (socket) => {
   });
 });
 
-// API route to get room info (optional)
-app.get("/api/room/:roomCode", async (req, res) => {
-  try {
-    const room = await Room.findOne({ roomCode: req.params.roomCode });
-    if (!room) {
-      return res.status(404).json({ error: "Room not found" });
-    }
-    res.json(room);
-  } catch (error) {
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// Serve frontend for all other routes
+// Serve frontend for all other routes (ADD THIS)
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });

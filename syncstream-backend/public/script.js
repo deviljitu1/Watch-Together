@@ -1,309 +1,312 @@
-  // ====== CONFIG ======
-  // Make sure this matches your server port (5000 or 5001)
-  const BACKEND_URL = 'http://localhost:5000';
+// ====== CONFIG ======
+// Use relative path since frontend is served from same domain as backend
+const BACKEND_URL = window.location.origin;
 
-  // ====== GLOBALS ======
-  let socket;
-  let isHost = false;
-  let username = 'User' + Math.floor(Math.random() * 1000);
-  let roomCodeGlobal = null;
-  let ytPlayer = null; // Declare ytPlayer variable
+// ====== GLOBALS ======
+let socket;
+let isHost = false;
+let username = 'User' + Math.floor(Math.random() * 1000);
+let roomCodeGlobal = null;
+let ytPlayer = null;
 
-  let ytReady = false;
-  let duration = 0;
-  let progressTimer = null;
+let ytReady = false;
+let duration = 0;
+let progressTimer = null;
 
-  // Flags to avoid event loops
-  let suppressOnStateEmit = false; // set true when applying remote updates
-  let emittedLocally = false;      // set true briefly when we emit from UI
+// Flags to avoid event loops
+let suppressOnStateEmit = false;
+let emittedLocally = false;
 
-  // Queue incoming actions until YT API is ready
-  const pendingActions = [];
+// Queue incoming actions until YT API is ready
+const pendingActions = [];
 
-  // ====== DOM ======
-  const roomSection = document.getElementById('roomSection');
-  const createRoomBtn = document.getElementById('createRoomBtn');
-  const joinRoomBtn = document.getElementById('joinRoomBtn');
-  const leaveRoomBtn = document.getElementById('leaveRoomBtn');
-  const roomCodeInput = document.getElementById('roomCodeInput');
-  const copyRoomCode = document.getElementById('copyRoomCode');
+// ====== DOM ======
+const roomSection = document.getElementById('roomSection');
+const createRoomBtn = document.getElementById('createRoomBtn');
+const joinRoomBtn = document.getElementById('joinRoomBtn');
+const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+const roomCodeInput = document.getElementById('roomCodeInput');
+const copyRoomCode = document.getElementById('copyRoomCode');
 
-  const playPauseBtn = document.getElementById('playPauseBtn');
-  const progressBar = document.getElementById('progressBar');
-  const progressClickable = document.getElementById('progressClickable');
-  const currentTimeElement = document.getElementById('currentTime');
-  const durationElement = document.getElementById('duration');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const progressBar = document.getElementById('progressBar');
+const progressClickable = document.getElementById('progressClickable');
+const currentTimeElement = document.getElementById('currentTime');
+const durationElement = document.getElementById('duration');
 
-  const youtubeUrl = document.getElementById('youtubeUrl');
-  const loadVideoBtn = document.getElementById('loadVideoBtn');
+const youtubeUrl = document.getElementById('youtubeUrl');
+const loadVideoBtn = document.getElementById('loadVideoBtn');
 
-  const chatInput = document.getElementById('chatInput');
-  const sendMessageBtn = document.getElementById('sendMessageBtn');
-  const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const sendMessageBtn = document.getElementById('sendMessageBtn');
+const chatMessages = document.getElementById('chatMessages');
 
-  const videoUpload = document.getElementById('videoUpload');
-  const uploadArea = document.getElementById('uploadArea');
-  const hostControls = document.getElementById('hostControls');
+const videoUpload = document.getElementById('videoUpload');
+const uploadArea = document.getElementById('uploadArea');
+const hostControls = document.getElementById('hostControls');
 
-  // ====== UTIL ======
-  function simulateNotification(message) {
-    const n = document.createElement('div');
-    n.textContent = message;
-    Object.assign(n.style, {
-      position:'fixed', bottom:'20px', right:'20px',
-      background:'rgba(0,0,0,0.8)', color:'#fff',
-      padding:'12px 20px', borderRadius:'50px', zIndex:'1000',
-      boxShadow:'0 5px 15px rgba(0,0,0,0.3)', animation:'fadeIn .3s ease'
-    });
-    document.body.appendChild(n);
-    setTimeout(()=>{ n.style.animation = 'fadeOut .3s ease'; setTimeout(()=>n.remove(),300); }, 2000);
-  }
-  function formatTime(s) {
-    const m = Math.floor(s/60);
-    const sec = Math.floor(s%60);
-    return `${m}:${sec<10?'0':''}${sec}`;
-  }
+// ====== UTIL ======
+function simulateNotification(message) {
+  const n = document.createElement('div');
+  n.textContent = message;
+  Object.assign(n.style, {
+    position:'fixed', bottom:'20px', right:'20px',
+    background:'rgba(0,0,0,0.8)', color:'#fff',
+    padding:'12px 20px', borderRadius:'50px', zIndex:'1000',
+    boxShadow:'0 5px 15px rgba(0,0,0,0.3)', animation:'fadeIn .3s ease'
+  });
+  document.body.appendChild(n);
+  setTimeout(()=>{ n.style.animation = 'fadeOut .3s ease'; setTimeout(()=>n.remove(),300); }, 2000);
+}
 
-  function updatePlayPauseIcon(isPlaying) {
-    // update the button icon
-    playPauseBtn.innerHTML = `<i class="fas ${isPlaying ? 'fa-pause' : 'fa-play'}"></i>`;
-  }
+function formatTime(s) {
+  const m = Math.floor(s/60);
+  const sec = Math.floor(s%60);
+  return `${m}:${sec<10?'0':''}${sec}`;
+}
 
-  function updateProgressUI() {
-    // If a local uploaded <video> is present, update using that
-    const localV = document.getElementById('localVideo');
-    if (localV) {
-      const cur = localV.currentTime || 0;
-      const dur = localV.duration || 0;
-      progressBar.style.width = `${dur ? (cur / dur) * 100 : 0}%`;
-      currentTimeElement.textContent = formatTime(cur);
-      durationElement.textContent = formatTime(dur || 0);
-      return;
-    }
+function updatePlayPauseIcon(isPlaying) {
+  playPauseBtn.innerHTML = `<i class="fas ${isPlaying ? 'fa-pause' : 'fa-play'}"></i>`;
+}
 
-    if (!ytPlayer) return;
-    const cur = ytPlayer.getCurrentTime?.() || 0;
-    const dur = ytPlayer.getDuration?.() || 0;
+function updateProgressUI() {
+  const localV = document.getElementById('localVideo');
+  if (localV) {
+    const cur = localV.currentTime || 0;
+    const dur = localV.duration || 0;
     progressBar.style.width = `${dur ? (cur / dur) * 100 : 0}%`;
     currentTimeElement.textContent = formatTime(cur);
     durationElement.textContent = formatTime(dur || 0);
+    return;
   }
 
-  function startProgressTimer() {
-    stopProgressTimer();
-    progressTimer = setInterval(updateProgressUI, 500);
-  }
-  function stopProgressTimer() {
-    if (progressTimer) clearInterval(progressTimer);
-    progressTimer = null;
-  }
-  function extractYouTubeId(url) {
+  if (!ytPlayer) return;
+  const cur = ytPlayer.getCurrentTime?.() || 0;
+  const dur = ytPlayer.getDuration?.() || 0;
+  progressBar.style.width = `${dur ? (cur / dur) * 100 : 0}%`;
+  currentTimeElement.textContent = formatTime(cur);
+  durationElement.textContent = formatTime(dur || 0);
+}
+
+function startProgressTimer() {
+  stopProgressTimer();
+  progressTimer = setInterval(updateProgressUI, 500);
+}
+
+function stopProgressTimer() {
+  if (progressTimer) clearInterval(progressTimer);
+  progressTimer = null;
+}
+
+function extractYouTubeId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1);
+    if (u.searchParams.get('v')) return u.searchParams.get('v');
+    const paths = u.pathname.split('/').filter(Boolean);
+    if (paths[0] === 'shorts' && paths[1]) return paths[1];
+  } catch(_) {}
+  return null;
+}
+
+// Apply a room state (used on join / when receiving room_state)
+function applyRoomState({ videoId, currentTime = 0, isPlaying = false }) {
+  if (!videoId) return;
+  
+  if (!ytPlayer) {
+    createPlayer(videoId, currentTime);
+  } else {
+    const currentVid = ytPlayer.getVideoData ? ytPlayer.getVideoData().video_id : null;
+    suppressOnStateEmit = true;
     try {
-      const u = new URL(url);
-      if (u.hostname.includes('youtu.be')) return u.pathname.slice(1);
-      if (u.searchParams.get('v')) return u.searchParams.get('v');
-      const paths = u.pathname.split('/').filter(Boolean);
-      if (paths[0] === 'shorts' && paths[1]) return paths[1];
-    } catch(_) {}
-    return null;
+      if (!currentVid || currentVid !== videoId) {
+        ytPlayer.loadVideoById({ videoId, startSeconds: currentTime });
+      } else {
+        ytPlayer.seekTo(currentTime, true);
+      }
+    } catch (e) {
+      createPlayer(videoId, currentTime);
+    }
   }
 
-  // Apply a room state (used on join / when receiving room_state)
-  function applyRoomState({ videoId, currentTime = 0, isPlaying = false }) {
-    if (!videoId) return; // nothing to do
-    // If player not created yet, create & load
-    if (!ytPlayer) {
-      createPlayer(videoId, currentTime);
-      // After created, play/pause will be handled via onReady/onStateChange or below
+  setTimeout(() => {
+    if (!ytPlayer) return;
+    suppressOnStateEmit = true;
+    if (isPlaying) {
+      try { ytPlayer.seekTo(currentTime, true); } catch(_) {}
+      ytPlayer.playVideo();
+      updatePlayPauseIcon(true);
     } else {
-      // If different video, load it; otherwise seek to time
-      const currentVid = ytPlayer.getVideoData ? ytPlayer.getVideoData().video_id : null;
-      suppressOnStateEmit = true;
-      try {
-        if (!currentVid || currentVid !== videoId) {
-          ytPlayer.loadVideoById({ videoId, startSeconds: currentTime });
-        } else {
-          ytPlayer.seekTo(currentTime, true);
+      try { ytPlayer.seekTo(currentTime, true); } catch(_) {}
+      ytPlayer.pauseVideo();
+      updatePlayPauseIcon(false);
+    }
+    startProgressTimer();
+  }, 400);
+}
+
+// ====== YT IFRAME API ======
+window.onYouTubeIframeAPIReady = function() {
+  ytReady = true;
+  if (!ytPlayer) createPlayer();
+  while (pendingActions.length) {
+    const act = pendingActions.shift();
+    try { act(); } catch(e) { console.error('pending action failed', e); }
+  }
+};
+
+function createPlayer(videoId = null, startSeconds = 0) {
+  const container = document.getElementById('playerPlaceholder');
+  container.innerHTML = '<div id="yt-player"></div>';
+  ytPlayer = new YT.Player('yt-player', {
+    videoId: videoId || undefined,
+    playerVars: {
+      rel: 0,
+      modestbranding: 1,
+      origin: window.location.origin,
+      controls: 0
+    },
+    events: {
+      onReady: () => {
+        if (startSeconds) {
+          try { ytPlayer.seekTo(startSeconds, true); } catch(e) {}
         }
-      } catch (e) {
-        // fallback: recreate player
-        createPlayer(videoId, currentTime);
+        updateProgressUI();
+        startProgressTimer();
+        const state = ytPlayer.getPlayerState();
+        updatePlayPauseIcon(state === 1); // 1 = PLAYING
+      },
+      onStateChange: (e) => {
+        if (!roomCodeGlobal) return;
+        if (suppressOnStateEmit) { suppressOnStateEmit = false; return; }
+        if (emittedLocally) { emittedLocally = false; return; }
+
+        const t = ytPlayer.getCurrentTime?.() || 0;
+        if (e.data === 1) { // PLAYING
+          if (socket && roomCodeGlobal) socket.emit('play', { roomCode: roomCodeGlobal, time: t });
+          updatePlayPauseIcon(true);
+        } else if (e.data === 2) { // PAUSED
+          if (socket && roomCodeGlobal) socket.emit('pause', { roomCode: roomCodeGlobal, time: t });
+          updatePlayPauseIcon(false);
+        }
       }
     }
+  });
+}
 
-    // Apply play/pause state after a short delay to ensure player ready
-    setTimeout(() => {
+// ====== SOCKET / ROOM FLOW ======
+function ensureSocket() {
+  if (socket) return socket;
+  socket = io(BACKEND_URL, {
+    transports: ['websocket'],
+    withCredentials: true
+  });
+
+  socket.on('connect', () => {
+    simulateNotification('Connected to server');
+    console.log('socket connected', socket.id);
+  });
+
+  socket.on('room_created', ({ roomCode }) => {
+    roomCodeGlobal = roomCode;
+    document.getElementById('roomCode').textContent = roomCode;
+    simulateNotification(`Room created: ${roomCode}`);
+  });
+
+  socket.on('joined_room', ({ roomCode, isHost: hostFlag }) => {
+    roomCodeGlobal = roomCode;
+    isHost = hostFlag;
+    hostControls.style.display = isHost ? 'block' : 'none';
+    simulateNotification(`Joined room ${roomCode}`);
+  });
+
+  // ADD THIS MISSING HANDLER
+  socket.on('you_are_host', () => {
+    isHost = true;
+    hostControls.style.display = 'block';
+    simulateNotification('You are now the host');
+  });
+
+  socket.on('participants', ({ count }) => {
+    document.getElementById('participantCount').textContent = `${count} participant${count>1?'s':''}`;
+  });
+
+  // ADD THIS MISSING HANDLER
+  socket.on('error', ({ message }) => {
+    simulateNotification(message);
+  });
+
+  socket.on('room_state', ({ videoId, currentTime = 0, isPlaying = false }) => {
+    const action = () => applyRoomState({ videoId, currentTime, isPlaying });
+    if (!ytReady) pendingActions.push(action);
+    else action();
+  });
+
+  socket.on('load_video', ({ videoId, time = 0 }) => {
+    const action = () => {
+      suppressOnStateEmit = true;
+      applyRoomState({ videoId, currentTime: time, isPlaying: false });
+    };
+    if (!ytReady) pendingActions.push(action); else action();
+  });
+
+  socket.on('play', ({ time }) => {
+    const action = () => {
+      const localV = document.getElementById('localVideo');
+      if (localV) return;
       if (!ytPlayer) return;
       suppressOnStateEmit = true;
-      if (isPlaying) {
-        try { ytPlayer.seekTo(currentTime, true); } catch(_) {}
-        ytPlayer.playVideo();
-        updatePlayPauseIcon(true);
-      } else {
-        try { ytPlayer.seekTo(currentTime, true); } catch(_) {}
-        ytPlayer.pauseVideo();
-        updatePlayPauseIcon(false);
+      try { ytPlayer.seekTo(time, true); } catch(_) {}
+      ytPlayer.playVideo();
+      updatePlayPauseIcon(true);
+    };
+    if (!ytReady) pendingActions.push(action); else action();
+  });
+
+  socket.on('pause', ({ time }) => {
+    const action = () => {
+      const localV = document.getElementById('localVideo');
+      if (localV) return;
+      if (!ytPlayer) return;
+      suppressOnStateEmit = true;
+      try { ytPlayer.seekTo(time, true); } catch(_) {}
+      ytPlayer.pauseVideo();
+      updatePlayPauseIcon(false);
+    };
+    if (!ytReady) pendingActions.push(action); else action();
+  });
+
+  socket.on('seek', ({ time }) => {
+    const action = () => {
+      const localV = document.getElementById('localVideo');
+      if (localV) {
+        localV.currentTime = time;
+        updateProgressUI();
+        return;
       }
-      startProgressTimer();
-    }, 400);
-  }
+      if (!ytPlayer) return;
+      suppressOnStateEmit = true;
+      ytPlayer.seekTo(time, true);
+    };
+    if (!ytReady) pendingActions.push(action); else action();
+  });
 
-  // ====== YT IFRAME API ======
-  window.onYouTubeIframeAPIReady = function() {
-    ytReady = true;
-    // Create an empty player container (no video yet)
-    if (!ytPlayer) createPlayer();
-    // apply any pending actions we received while not ready
-    while (pendingActions.length) {
-      const act = pendingActions.shift();
-      try { act(); } catch(e) { console.error('pending action failed', e); }
-    }
-  };
+  socket.on('chat_message', ({ sender, message }) => {
+    addMessageToChat(sender, message, sender === username);
+  });
 
-  function createPlayer(videoId = null, startSeconds = 0) {
-    const container = document.getElementById('playerPlaceholder');
-    container.innerHTML = '<div id="yt-player"></div>';
-    ytPlayer = new YT.Player('yt-player', {
-      videoId: videoId || undefined,
-      playerVars: {
-        rel: 0,
-        modestbranding: 1,
-        origin: window.location.origin,
-        // keep controls visible for users (set to 0 to hide default controls)
-        controls: 0
-      },
-      events: {
-        onReady: () => {
-          // If startSeconds provided, ensure seek
-          if (startSeconds) {
-            try { ytPlayer.seekTo(startSeconds, true); } catch(e) {}
-          }
-          updateProgressUI();
-          startProgressTimer();
-          // sync icon with initial state
-          const state = ytPlayer.getPlayerState();
-          updatePlayPauseIcon(state === YT.PlayerState.PLAYING);
-        },
-        onStateChange: (e) => {
-          // Prevent loop when applying remote changes
-          if (!roomCodeGlobal) return;
-          if (suppressOnStateEmit) { suppressOnStateEmit = false; return; }
-          if (emittedLocally) { emittedLocally = false; return; }
+  socket.on('connect_error', (err) => {
+    console.error('socket connect error', err);
+    simulateNotification('Socket connection error (check backend)');
+  });
 
-          // This block handles local user interactions that change player state
-          const t = ytPlayer.getCurrentTime?.() || 0;
-          if (e.data === YT.PlayerState.PLAYING) {
-            if (socket && roomCodeGlobal) socket.emit('play', { roomCode: roomCodeGlobal, time: t });
-            updatePlayPauseIcon(true);
-          } else if (e.data === YT.PlayerState.PAUSED) {
-            if (socket && roomCodeGlobal) socket.emit('pause', { roomCode: roomCodeGlobal, time: t });
-            updatePlayPauseIcon(false);
-          }
-        }
-      }
-    });
-  }
+  return socket;
+}
 
-  // ====== SOCKET / ROOM FLOW ======
-  function ensureSocket() {
-    if (socket) return socket;
-    socket = io(BACKEND_URL, {
-      transports: ['websocket'],
-      withCredentials: true
-    });
+// ====== UI HANDLERS ======
+// ... (keep your existing UI handlers as they are) ...
 
-    socket.on('connect', () => {
-      simulateNotification('Connected to server');
-      console.log('socket connected', socket.id);
-    });
-
-    socket.on('room_created', ({ roomCode }) => {
-      roomCodeGlobal = roomCode;
-      document.getElementById('roomCode').textContent = roomCode;
-      simulateNotification(`Room created: ${roomCode}`);
-    });
-
-    socket.on('joined_room', ({ roomCode, isHost: hostFlag }) => {
-      roomCodeGlobal = roomCode;
-      isHost = hostFlag;
-      hostControls.style.display = isHost ? 'block' : 'none';
-      simulateNotification(`Joined room ${roomCode}`);
-    });
-
-    socket.on('participants', ({ count }) => {
-      document.getElementById('participantCount').textContent = `${count} participant${count>1?'s':''}`;
-    });
-
-    // Auto-sync when joining: server emits room_state
-    socket.on('room_state', ({ videoId, currentTime = 0, isPlaying = false }) => {
-      const action = () => applyRoomState({ videoId, currentTime, isPlaying });
-      if (!ytReady) pendingActions.push(action);
-      else action();
-    });
-
-    // PLAYER events from server (sync to all)
-    socket.on('load_video', ({ videoId, time = 0 }) => {
-      const action = () => {
-        suppressOnStateEmit = true;
-        applyRoomState({ videoId, currentTime: time, isPlaying: false });
-      };
-      if (!ytReady) pendingActions.push(action); else action();
-    });
-
-    socket.on('play', ({ time }) => {
-      const action = () => {
-        const localV = document.getElementById('localVideo');
-        if (localV) return; // uploads are local-only
-        if (!ytPlayer) return;
-        suppressOnStateEmit = true;
-        try { ytPlayer.seekTo(time, true); } catch(_) {}
-        ytPlayer.playVideo();
-        updatePlayPauseIcon(true);
-      };
-      if (!ytReady) pendingActions.push(action); else action();
-    });
-
-    socket.on('pause', ({ time }) => {
-      const action = () => {
-        const localV = document.getElementById('localVideo');
-        if (localV) return;
-        if (!ytPlayer) return;
-        suppressOnStateEmit = true;
-        try { ytPlayer.seekTo(time, true); } catch(_) {}
-        ytPlayer.pauseVideo();
-        updatePlayPauseIcon(false);
-      };
-      if (!ytReady) pendingActions.push(action); else action();
-    });
-
-    socket.on('seek', ({ time }) => {
-      const action = () => {
-        const localV = document.getElementById('localVideo');
-        if (localV) {
-          localV.currentTime = time;
-          updateProgressUI();
-          return;
-        }
-        if (!ytPlayer) return;
-        suppressOnStateEmit = true;
-        ytPlayer.seekTo(time, true);
-      };
-      if (!ytReady) pendingActions.push(action); else action();
-    });
-
-    // CHAT
-    socket.on('chat_message', ({ sender, message }) => {
-      addMessageToChat(sender, message, sender === username);
-    });
-
-    socket.on('connect_error', (err) => {
-      console.error('socket connect error', err);
-      simulateNotification('Socket connection error (check backend)');
-    });
-
-    return socket;
-  }
-
+// After fixing these issues, your app should work with your deployed backend!
   // ====== UI HANDLERS ======
   createRoomBtn.addEventListener('click', () => {
     ensureSocket();
